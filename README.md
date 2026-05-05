@@ -79,7 +79,7 @@ eraseDeletedSectors=0
 
 ![File associations](screenshots/File_Associations.png)
 
-![Create D64 image (Alt+F5)](screenshots/Create_d64_ALT_F5.png)
+![Create D64 image (Alt+F5)](screenshots/Create_d64_ALT_F5_pack.png)
 
 ## Notes
 
