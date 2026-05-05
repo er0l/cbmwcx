@@ -1,0 +1,4 @@
+*.o
+*.so
+*.wcx64
+/dircbm/
