@@ -73,6 +73,14 @@ ignoreErrorTable=0
 eraseDeletedSectors=0
 ```
 
+## Screenshots
+
+![WCX Plugin configuration](screenshots/Plugins_WCX.png)
+
+![File associations](screenshots/File_Associations.png)
+
+![Create D64 image (Alt+F5)](screenshots/Create_d64_ALT_F5.png)
+
 ## Notes
 
 - T64 tape images are read-only (the format does not support writes)
