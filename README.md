@@ -81,6 +81,12 @@ eraseDeletedSectors=0
 
 ![Create D64 image (Alt+F5)](screenshots/Create_d64_ALT_F5_pack.png)
 
+## Usage
+
+### Creating a new disk image
+
+Press **Alt+F5** in Double Commander to open the pack dialog. Enter a filename with one of the supported extensions (e.g. `mydisk.d64`) and the plugin will create a new blank disk image of the corresponding type.
+
 ## Notes
 
 - T64 tape images are read-only (the format does not support writes)
