@@ -1,5 +1,7 @@
 # cbmwcx
 
+Current release: **v0.1.1**.
+
 A WCX packer plugin for [Double Commander](https://doublecmd.sourceforge.io/) on Linux that lets you browse, extract, create, and delete files inside Commodore disk and tape images.
 
 ## Supported formats
