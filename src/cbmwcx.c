@@ -159,6 +159,7 @@ static void parse_src_filename(const char *src, char *cbm_name, int cbm_namelen,
         if (strcasecmp(dot, ".seq") == 0) *cbm_type = CBM_TYPE_SEQ;
         else if (strcasecmp(dot, ".usr") == 0) *cbm_type = CBM_TYPE_USR;
         else if (strcasecmp(dot, ".rel") == 0) *cbm_type = CBM_TYPE_REL;
+        else if (strcasecmp(dot, ".del") == 0) *cbm_type = CBM_TYPE_DEL;
         else if (strcasecmp(dot, ".prg") == 0) *cbm_type = CBM_TYPE_PRG;
         *dot = '\0';  /* strip extension */
     }
@@ -251,7 +252,7 @@ int ReadHeader(void *hArcData, tHeaderData *HeaderData) {
     strncpy(HeaderData->FileName, h->cur_filename,   sizeof(HeaderData->FileName) - 1);
     HeaderData->PackSize = (int)h->cur_size_blocks;
     HeaderData->UnpSize  = (int)h->cur_size_bytes;
-    HeaderData->FileAttr = ((h->cur_cbm_flags & 0x0F) == CBM_TYPE_DEL) ? FA_HIDDEN : FA_ARCH;
+    HeaderData->FileAttr = (h->cur_cbm_flags == 0) ? FA_HIDDEN : FA_ARCH;
     if (h->cur_cbm_flags & CBM_LOCKED_BIT) HeaderData->FileAttr |= FA_READONLY;
     return 0;
 }
@@ -269,7 +270,7 @@ int ReadHeaderEx(void *hArcData, tHeaderDataEx *HeaderData) {
     strncpy(HeaderData->FileName, h->cur_filename,  sizeof(HeaderData->FileName) - 1);
     HeaderData->PackSize    = h->cur_size_blocks;
     HeaderData->UnpSize     = h->cur_size_bytes;
-    HeaderData->FileAttr    = ((h->cur_cbm_flags & 0x0F) == CBM_TYPE_DEL) ? FA_HIDDEN : FA_ARCH;
+    HeaderData->FileAttr    = (h->cur_cbm_flags == 0) ? FA_HIDDEN : FA_ARCH;
     if (h->cur_cbm_flags & CBM_LOCKED_BIT) HeaderData->FileAttr |= FA_READONLY;
     return 0;
 }
@@ -287,7 +288,7 @@ int ReadHeaderExW(void *hArcData, tHeaderDataExW *HeaderData) {
     utf8_to_wcs(h->cur_filename, HeaderData->FileName, WCX_MAX_PATH);
     HeaderData->PackSize = h->cur_size_blocks;
     HeaderData->UnpSize  = h->cur_size_bytes;
-    HeaderData->FileAttr = ((h->cur_cbm_flags & 0x0F) == CBM_TYPE_DEL) ? FA_HIDDEN : FA_ARCH;
+    HeaderData->FileAttr = (h->cur_cbm_flags == 0) ? FA_HIDDEN : FA_ARCH;
     if (h->cur_cbm_flags & CBM_LOCKED_BIT) HeaderData->FileAttr |= FA_READONLY;
     return 0;
 }

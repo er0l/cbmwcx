@@ -73,6 +73,11 @@ ignoreErrorTable=0
 eraseDeletedSectors=0
 ```
 
+Active DEL files appear as ordinary `.del` files without enabling scratched files.
+`showONLYScratchedFiles=1` filters out all active files, including DEL files.
+Named scratched entries are shown as hidden `.del` files when enabled; unused
+directory slots are omitted. Adding files preserves active DEL entries.
+
 ## Screenshots
 
 ![WCX Plugin configuration](screenshots/Plugins_WCX.png)

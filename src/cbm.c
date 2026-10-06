@@ -319,25 +319,28 @@ int cbm_dir_next(ArcHandle *h) {
             uint8_t ftype = sec[base + DSLOT_FILE_TYPE];
             int cbm_type  = ftype & 0x0F;
 
-            /* Deleted/empty slots */
-            if (cbm_type == CBM_TYPE_DEL) {
-                if (h->show_scratched || h->show_only_scratched) {
-                    /* Show scratched files as hidden */
-                } else {
-                    continue;  /* skip */
+            /* A zero type byte is scratched/unused; closed DEL ($80)
+             * is an active file, despite also having a zero low nibble. */
+            int scratched = (ftype == 0);
+            if (scratched) {
+                if (!h->show_scratched && !h->show_only_scratched) continue;
+                /* Freshly formatted slots have no filename. */
+                int has_name = 0;
+                for (int i = 0; i < 16; i++) {
+                    uint8_t ch = sec[base + DSLOT_NAME + i];
+                    if (ch != 0 && ch != 0xA0 && ch != ' ') has_name = 1;
                 }
+                if (!has_name) continue;
             } else {
                 if (h->show_only_scratched) continue;
+                if (!(ftype & CBM_CLOSED_BIT)) continue;
             }
-
-            /* Skip unclosed files (bit 7 = 0) unless it's DEL */
-            if (cbm_type != CBM_TYPE_DEL && !(ftype & CBM_CLOSED_BIT)) continue;
 
             uint8_t start_track  = sec[base + DSLOT_TRACK];
             uint8_t start_sector = sec[base + DSLOT_SECTOR];
 
-            /* DEL files have no data chain */
-            if (cbm_type == CBM_TYPE_DEL) {
+            /* Scratched chains may already have been reused. */
+            if (scratched) {
                 start_track = 0; start_sector = 0;
             }
 
@@ -355,7 +358,7 @@ int cbm_dir_next(ArcHandle *h) {
             memcpy(h->cur_raw_name, raw_name, 16);
 
             /* Compute actual byte size by traversing sector chain */
-            if (start_track != 0 && cbm_type != CBM_TYPE_DEL) {
+            if (start_track != 0 && !scratched) {
                 cbm_calc_file_size(h, start_track, start_sector,
                                    &h->cur_size_bytes, NULL);
             } else {
@@ -929,7 +932,7 @@ static uint8_t *find_free_dir_slot(ArcHandle *h) {
             /* Skip slot 0 of first dir sector (bytes 0-1 are chain link) */
             uint8_t *slot_base = sec + slot * DIR_SLOT_SIZE;
             uint8_t ftype = slot_base[DSLOT_FILE_TYPE];
-            if ((ftype & 0x0F) == CBM_TYPE_DEL) {
+            if (ftype == 0) {
                 /* Empty or scratched slot: reuse it */
                 memset(slot_base + 2, 0, DIR_SLOT_SIZE - 2);
                 return slot_base + 2;  /* points to file_type field */
@@ -974,7 +977,7 @@ int cbm_count_free_dir_entries(const ArcHandle *h) {
         if (!sec) break;
         for (int slot = 0; slot < DIR_SLOTS_PER_SECTOR; slot++) {
             const uint8_t *slot_base = sec + slot * DIR_SLOT_SIZE;
-            if ((slot_base[DSLOT_FILE_TYPE] & 0x0F) == CBM_TYPE_DEL) count++;
+            if (slot_base[DSLOT_FILE_TYPE] == 0) count++;
         }
         uint8_t next_t = sec[0], next_s = sec[1];
         if (next_t == 0) break;
@@ -1090,7 +1093,7 @@ int cbm_delete_file(ArcHandle *h, const uint8_t *raw_name, int cbm_type) {
         for (int slot = 0; slot < DIR_SLOTS_PER_SECTOR; slot++) {
             uint8_t *slot_base = sec + slot * DIR_SLOT_SIZE;
             uint8_t ftype = slot_base[DSLOT_FILE_TYPE];
-            if ((ftype & 0x0F) == CBM_TYPE_DEL) continue;
+            if (ftype == 0) continue;
             if ((ftype & 0x0F) != cbm_type) continue;
             if (memcmp(slot_base + DSLOT_NAME, raw_name, 16) != 0) continue;
 
