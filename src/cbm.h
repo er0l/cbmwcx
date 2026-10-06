@@ -93,6 +93,8 @@ typedef struct ArcHandle {
     int       dir_track;        /* current directory sector track */
     int       dir_sector;       /* current directory sector */
     int       dir_slot;         /* current slot within sector 0..7 */
+    int       disk_info_emitted;
+    int       cur_is_disk_info;
     int       at_end;           /* nonzero when enumeration is finished */
 
     /* T64 state */
@@ -117,6 +119,10 @@ typedef struct ArcHandle {
     tChangeVolProc   change_vol;
 
     /* Config (from INI) */
+    int petscii_mode;          /* 0=legacy, 1=Unicode, 2=Style64 font */
+    int petscii_lowercase;     /* 0=uppercase/graphics, 1=lowercase/uppercase */
+    int show_file_size_in_blocks; /* listing only; disk directory block count */
+    int show_free_blocks;
     int show_scratched;
     int show_only_scratched;
     int append_prg_ext;
@@ -138,6 +144,11 @@ int  cbm_valid_image(const ArcHandle *h);
 void cbm_petscii_to_utf8(const uint8_t *petscii, int len, char *out, int outsize);
 void cbm_utf8_to_petscii(const char *utf8, uint8_t *petscii, int len);
 void cbm_sanitize_filename(char *name);
+
+void cbm_petscii_display(const uint8_t *raw, int len, char *out, int outsize,
+                         int mode, int lowercase);
+void cbm_display_to_petscii(const char *text, uint8_t *raw, int len,
+                           int mode, int lowercase);
 
 /* ---- Disk metadata ---- */
 void cbm_disk_name(const ArcHandle *h, char *name, int namesize);
@@ -166,6 +177,7 @@ int  cbm_write_file(ArcHandle *h, const char *src_path, const char *cbm_name, in
 int  cbm_delete_file(ArcHandle *h, const uint8_t *raw_name, int cbm_type);
 int  cbm_count_free_dir_entries(const ArcHandle *h);
 int  cbm_count_free_blocks(const ArcHandle *h);
+int  cbm_d64_free_blocks(const ArcHandle *h);
 
 /* ---- T64 ---- */
 int  cbm_t64_read_header(ArcHandle *h);

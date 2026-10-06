@@ -198,6 +198,106 @@ void cbm_utf8_to_petscii(const char *utf8, uint8_t *petscii, int len) {
     }
 }
 
+/* Printable PETSCII graphics, in byte order $60-$7f and $a0-$bf.
+ * Standard Unicode shapes; uncommon shapes use Style64's direct PETSCII PUA.
+ * References: https://style64.org/petscii/ and
+ * https://www.pagetable.com/c64ref/charset/ */
+static const uint32_t petscii_graphics[64] = {
+    0x2500, 0x2660, 0x2502, 0x2500, 0, 0, 0, 0,
+    0, 0x256e, 0x2570, 0x256f, 0, 0x2572, 0x2571, 0,
+    0, 0x25cf, 0, 0x2665, 0, 0x256d, 0x2573, 0x25cb,
+    0x2663, 0, 0x2666, 0x253c, 0, 0x2502, 0x03c0, 0x25e5,
+    0x00a0, 0x258c, 0x2584, 0x2594, 0x2581, 0x258f, 0x2592, 0x2595,
+    0, 0x25e4, 0, 0x251c, 0x2597, 0x2514, 0x2510, 0x2582,
+    0x250c, 0x2534, 0x252c, 0x2524, 0x258e, 0x258d, 0, 0,
+    0, 0x2583, 0, 0x2596, 0x259d, 0x2518, 0x2598, 0x259a
+};
+
+static uint32_t petscii_codepoint(uint8_t c, int mode, int lowercase) {
+    uint32_t pua = (lowercase ? 0xe100 : 0xe000) + c;
+    if (mode == 2) return pua;
+    if (c < 0x20 || (c >= 0x80 && c < 0xa0)) return pua;
+    if (c >= 0x20 && c <= 0x40) return c;
+    if (c >= 0x41 && c <= 0x5a) return (lowercase ? 'a' : 'A') + c - 0x41;
+    if (c == 0x5b || c == 0x5d) return c;
+    if (c == 0x5c) return 0x00a3;
+    if (c == 0x5e) return 0x2191;
+    if (c == 0x5f) return 0x2190;
+    uint8_t normalized = c;
+    if (c >= 0xc0 && c <= 0xdf) normalized = c - 0x60;
+    else if (c >= 0xe0 && c <= 0xfe) normalized = c - 0x40;
+    else if (c == 0xff) normalized = 0x7e;
+    if (lowercase && normalized >= 0x61 && normalized <= 0x7a)
+        return 'A' + normalized - 0x61;
+    if (lowercase && normalized == 0xba) return 0x2713;
+    int index = normalized < 0x80 ? normalized - 0x60 : normalized - 0xa0 + 32;
+    uint32_t cp = petscii_graphics[index];
+    return cp ? cp : pua;
+}
+
+static int encode_utf8(uint32_t cp, char *out) {
+    if (cp < 0x80) { out[0] = cp; return 1; }
+    if (cp < 0x800) {
+        out[0] = 0xc0 | (cp >> 6); out[1] = 0x80 | (cp & 63); return 2;
+    }
+    out[0] = 0xe0 | (cp >> 12);
+    out[1] = 0x80 | ((cp >> 6) & 63); out[2] = 0x80 | (cp & 63); return 3;
+}
+
+void cbm_petscii_display(const uint8_t *raw, int len, char *out, int outsize,
+                         int mode, int lowercase) {
+    if (outsize <= 0) return;
+    if (mode == 0) { cbm_petscii_to_utf8(raw, len, out, outsize); return; }
+    /* Trim only trailing padding; embedded shifted spaces belong to the name. */
+    while (len > 0 && (raw[len - 1] == 0xa0 || raw[len - 1] == 0)) len--;
+    int used = 0;
+    for (int i = 0; i < len; i++) {
+        char encoded[3];
+        int n = encode_utf8(petscii_codepoint(raw[i], mode, lowercase), encoded);
+        if (used + n >= outsize) break;
+        memcpy(out + used, encoded, n); used += n;
+    }
+    out[used] = '\0';
+}
+
+/* Decode complete UTF-8 characters rather than treating their bytes as PETSCII. */
+static uint32_t next_utf8(const unsigned char **text) {
+    const unsigned char *s = *text;
+    uint32_t cp = *s++;
+    int count = 0;
+    uint32_t minimum = 0;
+    if (cp < 0x80) { *text = s; return cp; }
+    if (cp >= 0xc2 && cp <= 0xdf) { cp &= 31; count = 1; minimum = 0x80; }
+    else if (cp >= 0xe0 && cp <= 0xef) { cp &= 15; count = 2; minimum = 0x800; }
+    else if (cp >= 0xf0 && cp <= 0xf4) { cp &= 7; count = 3; minimum = 0x10000; }
+    else { *text = s; return 0xfffd; }
+    for (int i = 0; i < count; i++) {
+        if ((*s & 0xc0) != 0x80) { *text = s; return 0xfffd; }
+        cp = (cp << 6) | (*s++ & 63);
+    }
+    *text = s;
+    if (cp < minimum || cp > 0x10ffff || (cp >= 0xd800 && cp <= 0xdfff)) return 0xfffd;
+    return cp;
+}
+
+void cbm_display_to_petscii(const char *text, uint8_t *raw, int len,
+                           int mode, int lowercase) {
+    if (mode == 0) { cbm_utf8_to_petscii(text, raw, len); return; }
+    memset(raw, 0xa0, len);
+    const unsigned char *s = (const unsigned char *)text;
+    for (int i = 0; i < len && *s; i++) {
+        uint32_t cp = next_utf8(&s);
+        if (cp >= 0xe000 && cp <= 0xe1ff) { raw[i] = cp & 255; continue; }
+        if (!lowercase && cp >= 'a' && cp <= 'z') cp -= 'a' - 'A';
+        raw[i] = '_';
+        /* Prefer printable canonical bytes over aliases and control codes. */
+        for (int c = 0x20; c <= 0xff; c++) {
+            if (c >= 0x80 && c <= 0x9f) continue;
+            if (petscii_codepoint(c, 1, lowercase) == cp) { raw[i] = c; break; }
+        }
+    }
+}
+
 /* Replace characters illegal on the host filesystem with '_' */
 void cbm_sanitize_filename(char *name) {
     static const char illegal[] = "\\/:*?\"<>|";
@@ -288,8 +388,9 @@ void cbm_dir_rewind(ArcHandle *h) {
  * Handles append_prg_ext setting. */
 static void make_display_name(ArcHandle *h, const uint8_t *raw_name, int cbm_type,
                                char *out, int outsize) {
-    char ascii[32];
-    cbm_petscii_to_utf8(raw_name, 16, ascii, sizeof(ascii));
+    char ascii[16 * 3 + 1];
+    cbm_petscii_display(raw_name, 16, ascii, sizeof(ascii),
+                        h->petscii_mode, h->petscii_lowercase);
     cbm_sanitize_filename(ascii);
 
     if (h->append_prg_ext || cbm_type != CBM_TYPE_PRG) {
@@ -706,6 +807,22 @@ int cbm_alloc_sector(ArcHandle *h, int near_track, int *out_track, int *out_sect
     return E_NO_FILES;
 }
 
+/* Standard 1541 DOS free count: BAM counters for tracks 1-35 except 18.
+ * Extended-track BAM layouts vary, so do not read disk-name bytes as counts. */
+int cbm_d64_free_blocks(const ArcHandle *h) {
+    if (h->disk_type != DISK_D64_35 && h->disk_type != DISK_D64_40) return -1;
+    const uint8_t *bam = cbm_sector(h, D64_BAM_TRACK, D64_BAM_SECTOR);
+    if (!bam) return -1;
+    int total = 0;
+    for (int track = 1; track <= 35; track++) {
+        if (track == D64_DIR_TRACK) continue;
+        int count = bam[D64_BAM_ENTRY_OFF + (track - 1) * 4];
+        if (count > cbm_sectors_per_track(h->disk_type, track)) return -1;
+        total += count;
+    }
+    return total;
+}
+
 int cbm_count_free_blocks(const ArcHandle *h) {
     int total = 0;
     int max = cbm_max_tracks(h->disk_type);
@@ -1063,7 +1180,8 @@ int cbm_write_file(ArcHandle *h, const char *src_path,
 
     /* Fill directory entry */
     uint8_t petscii_name[16];
-    cbm_utf8_to_petscii(cbm_name, petscii_name, 16);
+    cbm_display_to_petscii(cbm_name, petscii_name, 16,
+                           h->petscii_mode, h->petscii_lowercase);
 
     dent[0] = (uint8_t)(CBM_CLOSED_BIT | cbm_type);  /* file type, closed */
     dent[1] = (uint8_t)first_t;
@@ -1192,8 +1310,9 @@ int cbm_t64_next(ArcHandle *h) {
         h->cur_t64_offset  = data_off;
         memcpy(h->cur_raw_name, e + 16, 16);
 
-        char ascii_name[32];
-        cbm_petscii_to_utf8(e + 16, 16, ascii_name, sizeof(ascii_name));
+        char ascii_name[16 * 3 + 1];
+        cbm_petscii_display(e + 16, 16, ascii_name, sizeof(ascii_name),
+                            h->petscii_mode, h->petscii_lowercase);
         cbm_sanitize_filename(ascii_name);
         snprintf(h->cur_filename, sizeof(h->cur_filename), "%s.prg", ascii_name);
         return 0;

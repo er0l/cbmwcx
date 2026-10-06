@@ -108,6 +108,10 @@ static void utf8_to_wcs(const char *src, uint16_t *dst, int dstlen) {
 static ArcHandle *alloc_handle(void) {
     ArcHandle *h = calloc(1, sizeof(ArcHandle));
     if (!h) return NULL;
+    h->petscii_mode          = g_cfg.petscii_mode;
+    h->petscii_lowercase     = g_cfg.petscii_lowercase;
+    h->show_file_size_in_blocks = g_cfg.show_file_size_in_blocks;
+    h->show_free_blocks      = g_cfg.show_free_blocks;
     h->show_scratched        = g_cfg.show_scratched;
     h->show_only_scratched   = g_cfg.show_only_scratched;
     h->append_prg_ext        = g_cfg.append_prg_ext;
@@ -167,7 +171,7 @@ static void parse_src_filename(const char *src, char *cbm_name, int cbm_namelen,
     /* Truncate to 16 PETSCII characters */
     strncpy(cbm_name, base, cbm_namelen - 1);
     cbm_name[cbm_namelen - 1] = '\0';
-    if ((int)strlen(cbm_name) > 16) cbm_name[16] = '\0';
+    /* The converter limits the result to 16 PETSCII bytes. */
 }
 
 /* Build full destination path from dest_path + filename */
@@ -239,19 +243,53 @@ void *OpenArchive(tOpenArchiveData *ArchiveData) {
     return h;
 }
 
+/* A virtual listing row reports capacity without pretending to be disk data. */
+static int next_header_entry(ArcHandle *h) {
+    h->cur_is_disk_info = 0;
+    if (h->show_free_blocks && !h->disk_info_emitted &&
+        h->open_mode == PK_OM_LIST &&
+        (h->disk_type == DISK_D64_35 || h->disk_type == DISK_D64_40)) {
+        h->disk_info_emitted = 1;
+        int blocks = cbm_d64_free_blocks(h);
+        const char *scope = h->disk_type == DISK_D64_40 ? " (tracks 1-35)" : "";
+        if (blocks >= 0)
+            snprintf(h->cur_filename, sizeof(h->cur_filename),
+                     "[%d blocks free%s]", blocks, scope);
+        else
+            snprintf(h->cur_filename, sizeof(h->cur_filename), "[free blocks unavailable]");
+        h->cur_is_disk_info = 1;
+        h->cur_track = 0; h->cur_sector = 0;
+        h->cur_size_blocks = 0; h->cur_size_bytes = 0;
+        h->cur_cbm_type = CBM_TYPE_DEL;
+        h->cur_cbm_flags = CBM_CLOSED_BIT | CBM_LOCKED_BIT;
+        memset(h->cur_raw_name, 0, sizeof(h->cur_raw_name));
+        return 0;
+    }
+    return h->disk_type == DISK_T64 ? cbm_t64_next(h) : cbm_dir_next(h);
+}
+
+/* WCX has no unit field. Block counts are an opt-in listing presentation;
+ * extraction headers must continue reporting the actual byte length. */
+static uint32_t header_file_size(const ArcHandle *h) {
+    if (h->show_file_size_in_blocks && h->open_mode == PK_OM_LIST &&
+        h->disk_type != DISK_T64)
+        return h->cur_size_blocks;
+    return h->cur_size_bytes;
+}
+
 int ReadHeader(void *hArcData, tHeaderData *HeaderData) {
     DLOG("ReadHeader");
     ArcHandle *h = (ArcHandle *)hArcData;
     if (!h || h->at_end) return E_END_ARCHIVE;
 
-    int ret = (h->disk_type == DISK_T64) ? cbm_t64_next(h) : cbm_dir_next(h);
+    int ret = next_header_entry(h);
     if (ret != 0) return ret;
 
     memset(HeaderData, 0, sizeof(*HeaderData));
     strncpy(HeaderData->ArcName,  h->arc_name,      sizeof(HeaderData->ArcName) - 1);
     strncpy(HeaderData->FileName, h->cur_filename,   sizeof(HeaderData->FileName) - 1);
     HeaderData->PackSize = (int)h->cur_size_blocks;
-    HeaderData->UnpSize  = (int)h->cur_size_bytes;
+    HeaderData->UnpSize  = (int)header_file_size(h);
     HeaderData->FileAttr = (h->cur_cbm_flags == 0) ? FA_HIDDEN : FA_ARCH;
     if (h->cur_cbm_flags & CBM_LOCKED_BIT) HeaderData->FileAttr |= FA_READONLY;
     return 0;
@@ -262,14 +300,14 @@ int ReadHeaderEx(void *hArcData, tHeaderDataEx *HeaderData) {
     ArcHandle *h = (ArcHandle *)hArcData;
     if (!h || h->at_end) return E_END_ARCHIVE;
 
-    int ret = (h->disk_type == DISK_T64) ? cbm_t64_next(h) : cbm_dir_next(h);
+    int ret = next_header_entry(h);
     if (ret != 0) return ret;
 
     memset(HeaderData, 0, sizeof(*HeaderData));
     strncpy(HeaderData->ArcName,  h->arc_name,     sizeof(HeaderData->ArcName) - 1);
     strncpy(HeaderData->FileName, h->cur_filename,  sizeof(HeaderData->FileName) - 1);
     HeaderData->PackSize    = h->cur_size_blocks;
-    HeaderData->UnpSize     = h->cur_size_bytes;
+    HeaderData->UnpSize     = header_file_size(h);
     HeaderData->FileAttr    = (h->cur_cbm_flags == 0) ? FA_HIDDEN : FA_ARCH;
     if (h->cur_cbm_flags & CBM_LOCKED_BIT) HeaderData->FileAttr |= FA_READONLY;
     return 0;
@@ -280,14 +318,14 @@ int ReadHeaderExW(void *hArcData, tHeaderDataExW *HeaderData) {
     ArcHandle *h = (ArcHandle *)hArcData;
     if (!h || h->at_end) return E_END_ARCHIVE;
 
-    int ret = (h->disk_type == DISK_T64) ? cbm_t64_next(h) : cbm_dir_next(h);
+    int ret = next_header_entry(h);
     if (ret != 0) return ret;
 
     memset(HeaderData, 0, sizeof(*HeaderData));
     utf8_to_wcs(h->arc_name,     HeaderData->ArcName,  WCX_MAX_PATH);
     utf8_to_wcs(h->cur_filename, HeaderData->FileName, WCX_MAX_PATH);
     HeaderData->PackSize = h->cur_size_blocks;
-    HeaderData->UnpSize  = h->cur_size_bytes;
+    HeaderData->UnpSize  = header_file_size(h);
     HeaderData->FileAttr = (h->cur_cbm_flags == 0) ? FA_HIDDEN : FA_ARCH;
     if (h->cur_cbm_flags & CBM_LOCKED_BIT) HeaderData->FileAttr |= FA_READONLY;
     return 0;
@@ -299,6 +337,8 @@ int ProcessFile(void *hArcData, int Operation,
     if (!h) return E_BAD_ARCHIVE;
 
     if (Operation == PK_SKIP) return 0;
+    if (h->cur_is_disk_info)
+        return Operation == PK_TEST ? 0 : E_NOT_SUPPORTED;
 
     if (Operation == PK_TEST) {
         /* Just verify the sector chain */
@@ -423,7 +463,7 @@ int PackFiles(char *PackedFile, char *SubPath, char *SrcPath,
         else
             strncpy(src_full, p, sizeof(src_full) - 1);
 
-        char cbm_name[32];
+        char cbm_name[WCX_MAX_PATH];
         int cbm_type;
         parse_src_filename(p, cbm_name, sizeof(cbm_name), &cbm_type);
 
@@ -502,19 +542,29 @@ int DeleteFiles(char *PackedFile, char *DeleteList) {
     }
 
     for (const char *p = DeleteList; *p; p += strlen(p) + 1) {
-        /* Parse filename to get CBM name + type */
-        char cbm_name[32];
-        int cbm_type;
-        parse_src_filename(p, cbm_name, sizeof(cbm_name), &cbm_type);
-
-        uint8_t petscii[16];
-        cbm_utf8_to_petscii(cbm_name, petscii, 16);
-
-        /* Try to delete; ignore "not found" errors for batch delete */
-        cbm_delete_file(h, petscii, cbm_type);
+        /* Match the displayed name, then use the original bytes. Unicode
+         * glyphs can have multiple PETSCII encodings; never reverse-map here. */
+        uint8_t raw_name[16];
+        int cbm_type = 0, matches = 0;
+        cbm_dir_rewind(h);
+        int result;
+        while ((result = cbm_dir_next(h)) == 0) {
+            if (h->cur_cbm_flags != 0 && strcmp(p, h->cur_filename) == 0) {
+                memcpy(raw_name, h->cur_raw_name, 16);
+                cbm_type = h->cur_cbm_type;
+                matches++;
+            }
+        }
+        if (result != E_END_ARCHIVE) { ret = result; break; }
+        /* Refuse ambiguous names instead of deleting the wrong entry. */
+        if (matches > 1) { ret = E_BAD_DATA; break; }
+        if (matches == 1) {
+            ret = cbm_delete_file(h, raw_name, cbm_type);
+            if (ret != 0) break;
+        }
     }
 
-    if (h->dirty) ret = cbm_save_image(h);
+    if (ret == 0 && h->dirty) ret = cbm_save_image(h);
     h->dirty = 0;
 
 done:

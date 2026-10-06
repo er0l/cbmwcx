@@ -7,6 +7,10 @@
 #include "ini.h"
 
 void ini_defaults(CbmConfig *cfg) {
+    cfg->petscii_mode          = 1;
+    cfg->petscii_lowercase     = 0;
+    cfg->show_file_size_in_blocks = 0;
+    cfg->show_free_blocks      = 0;
     cfg->show_scratched        = 0;
     cfg->show_only_scratched   = 0;
     cfg->append_prg_ext        = 0;
@@ -44,7 +48,16 @@ void ini_load(const char *path, CbmConfig *cfg) {
         char *key = trim(s);
         char *val = trim(eq + 1);
 
-        if (strcasecmp(key, "showScratchedFiles") == 0)
+        if (strcasecmp(key, "petsciiMode") == 0) {
+            int mode = atoi(val);
+            if (mode >= 0 && mode <= 2) cfg->petscii_mode = mode;
+        } else if (strcasecmp(key, "petsciiLowercase") == 0)
+            cfg->petscii_lowercase = parse_bool(val);
+        else if (strcasecmp(key, "showFileSizeInBlocks") == 0)
+            cfg->show_file_size_in_blocks = parse_bool(val);
+        else if (strcasecmp(key, "showFreeBlocks") == 0)
+            cfg->show_free_blocks = parse_bool(val);
+        else if (strcasecmp(key, "showScratchedFiles") == 0)
             cfg->show_scratched = parse_bool(val);
         else if (strcasecmp(key, "showONLYScratchedFiles") == 0)
             cfg->show_only_scratched = parse_bool(val);
